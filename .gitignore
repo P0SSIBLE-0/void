@@ -10,6 +10,11 @@
 !.yarn/releases
 !.yarn/versions
 
+# requirement.md
+GEMINI.md
+requirement.md
+Implement.md
+
 # testing
 /coverage
 
