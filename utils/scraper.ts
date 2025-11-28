@@ -154,14 +154,33 @@ async function fastScrape(url: string) {
 // --- Level 2: Deep Scrape (Puppeteer) ---
 
 async function getBrowser() {
+  console.log(`[getBrowser] IS_PRODUCTION: ${IS_PRODUCTION}, NODE_ENV: ${process.env.NODE_ENV}`);
+
   if (IS_PRODUCTION) {
-    chromium.setGraphicsMode = false;
-    return await puppeteerCore.launch({
-      args: chromium.args,
-      defaultViewport: { width: 1280, height: 720 },
-      executablePath: await chromium.executablePath(),
-      headless: true,
-    });
+    try {
+      chromium.setGraphicsMode = false;
+      const executablePath = await chromium.executablePath();
+      console.log(`[getBrowser] Executable path: ${executablePath}`);
+
+      return await puppeteerCore.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1280, height: 720 },
+        executablePath: executablePath,
+        headless: true,
+      });
+    } catch (error) {
+      console.error("[getBrowser] Failed to launch production browser (chromium). This is expected if running locally with NODE_ENV=production. Falling back to local puppeteer.", error);
+      // Fallback to local puppeteer
+      return await puppeteer.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled'
+        ]
+      });
+    }
   } else {
     return await puppeteer.launch({
       headless: true,
