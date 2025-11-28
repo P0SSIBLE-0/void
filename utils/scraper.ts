@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 // --- Configuration ---
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const TIMEOUT_MS = 15000;
+const TIMEOUT_MS = 9000;
 
 // Limits
 const LIMITS = {
@@ -157,11 +157,10 @@ async function getBrowser() {
   if (IS_PRODUCTION) {
     chromium.setGraphicsMode = false;
     return await puppeteerCore.launch({
-      // @ts-ignore
       args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
+      defaultViewport: { width: 1280, height: 720 },
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless as any,
+      headless: true,
     });
   } else {
     return await puppeteer.launch({
