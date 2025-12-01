@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as motion from "motion/react-client";
-import { Globe, FileText, Search, X, Link as LinkIcon, Calendar, Tag, ExternalLink, Copy, Share2, Trash2, Clock, Plus, Loader2 } from "lucide-react";
+import {
+    Globe, FileText, Search, X, Link as LinkIcon, Calendar, Tag, ExternalLink,
+    Copy, Share2, Trash2, Clock, Plus, Loader2, Image as ImageIcon, Type, MoreHorizontal, CreditCard, Layout
+} from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from 'date-fns';
 import { Item } from "@/types/item";
 
+// --- Helper Functions ---
 function tryGetHostname(url: string) {
     try {
         return new URL(url).hostname.replace('www.', '');
@@ -12,6 +16,19 @@ function tryGetHostname(url: string) {
         return 'link';
     }
 }
+
+function getFaviconUrl(item: Item): string {
+    if (item.meta?.favicon) return item.meta.favicon;
+    if (item.url) {
+        try {
+            const url = new URL(item.url);
+            return `https://www.google.com/s2/favicons?domain=${url.hostname}&sz=32`;
+        } catch { }
+    }
+    return "";
+}
+
+// --- Components ---
 
 export const ItemPreviewModal = ({
     item: initialItem,
@@ -31,9 +48,8 @@ export const ItemPreviewModal = ({
     const [newTag, setNewTag] = useState("");
     const [isDeleting, setIsDeleting] = useState(false);
     const [isAddingTag, setIsAddingTag] = useState(false);
-    const imageRef = useRef<HTMLImageElement>(null);
+    const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
-    // Update local state when initialItem changes
     useEffect(() => {
         setItem(initialItem);
         setNotes(initialItem?.content || "");
@@ -43,6 +59,11 @@ export const ItemPreviewModal = ({
 
     const displayImage = item.image || item.meta?.image;
     const hostname = item.url ? tryGetHostname(item.url) : '';
+    const favicon = getFaviconUrl(item);
+    const price = item.meta?.price;
+    const currency = item.meta?.currency || '';
+
+    // --- Handlers ---
 
     const handleNotesBlur = async () => {
         if (notes !== item.content) {
@@ -61,7 +82,13 @@ export const ItemPreviewModal = ({
 
     const handleAddTag = async () => {
         if (!newTag.trim()) return;
-        const updatedTags = [...(item.tags || []), newTag.trim()];
+        const currentTags = item.tags || [];
+        if (currentTags.includes(newTag.trim())) {
+            setNewTag("");
+            return;
+        }
+
+        const updatedTags = [...currentTags, newTag.trim()];
         try {
             const res = await fetch(`/api/items/${item.id}`, {
                 method: 'PATCH',
@@ -112,193 +139,253 @@ export const ItemPreviewModal = ({
         }
     };
 
-    return (
-        <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-neutral-950/60 backdrop-blur-sm" onClick={onClose}>
-            <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-neutral-100 dark:bg-secondary w-full max-w-7xl h-[85dvh] rounded-[24px] overflow-hidden shadow-xl flex flex-col md:flex-row border border-white/20 dark:bg-dark/80 ring-1 ring-black/5"
-            >
-                {/* Left: Visual Content (Browser-like container) */}
-                <div className="w-full md:w-[65%] h-[30%] md:h-full bg-[#e4e5e9] dark:bg-dark/80 relative flex flex-col border-0 lg:md:border-r lg:md:border-neutral-300/50 shrink-0">
-                    {/* Fake Browser Bar */}
-                    {displayImage && (
-                        <div className="absolute top-5 hidden md:lg:block left-6 right-6 h-auto z-10">
-                            <div className="bg-neutral-900/90 backdrop-blur-md rounded-sm px-4 py-3 shadow-xl flex items-center gap-4">
-                                <div className="flex gap-1.5">
-                                    <div className="w-2.5 h-2.5 rounded-full bg-red-600" />
-                                    <div className="w-2.5 h-2.5 rounded-full bg-green-600" />
-                                    <div className="w-2.5 h-2.5 rounded-full bg-neutral-600" />
-                                </div>
-                                <div className="h-4 w-px bg-white/10 mx-1" />
-                                <Search className="w-3.5 h-3.5 text-neutral-400" />
-                                <span className="text-xs font-medium text-neutral-300 truncate max-w-[300px]">
-                                    {item.url || 'Local Note'}
-                                </span>
-                            </div>
-                        </div>
-                    )}
+    const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+        const { naturalWidth, naturalHeight } = e.currentTarget;
+        setImageSize({ width: naturalWidth, height: naturalHeight });
+    };
 
-                    {/* Image Container - Dynamic Sizing based on Aspect Ratio */}
-                    <div className="flex-1 p-2 md:p-10 flex items-center justify-center overflow-hidden relative">
+    // --- Render ---
+
+    return (
+        <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm"
+            onClick={onClose}
+        >
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-(--background) w-full max-w-6xl h-[90vh] sm:h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row border border-neutral-200 dark:border-neutral-800 ring-1 ring-black/5"
+            >
+                {/* --- LEFT: Visual Content --- */}
+                <div className="w-full lg:w-[60%] h-[40%] lg:h-full bg-neutral-100/50 dark:bg-neutral-900/50 relative flex flex-col border-b lg:border-b-0 lg:border-r border-neutral-200 dark:border-neutral-800">
+
+                    {/* Header (Mobile Only Close) */}
+                    <div className="absolute top-4 right-4 z-20 lg:hidden">
+                        <button onClick={onClose} className="p-2 bg-black/50 text-white rounded-full backdrop-blur-md">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    {/* Preview Area */}
+                    <div className="flex-1 relative flex items-center justify-center p-4 lg:p-8 overflow-hidden group">
                         {displayImage ? (
-                            <div
-                                className="relative h-full w-full rounded-xl overflow-hidden shadow-2xl ring-1 ring-black/10 bg-black flex items-center justify-center"
-                            >
-                                <motion.img
-                                    ref={imageRef}
-                                    src={displayImage}
-                                    alt={item.title}
-                                    className="w-full h-full object-contain"
+                            <>
+                                {/* Blurred Background for Fill */}
+                                <div
+                                    className="absolute inset-0 opacity-20 dark:opacity-10 blur-3xl scale-110 pointer-events-none"
+                                    style={{
+                                        backgroundImage: `url(${displayImage})`,
+                                        backgroundPosition: 'center',
+                                        backgroundSize: 'cover'
+                                    }}
                                 />
 
-                                {item.url && (
-                                    <a
-                                        href={item.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="absolute bottom-6 left-6 bg-primary hover:bg-primary-hover text-white px-5 py-2.5 rounded-full font-bold text-sm shadow-lg transition-all flex items-center gap-2 transform hover:-translate-y-0.5 active:translate-y-0"
-                                    >
-                                        <img src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} className="w-4 h-4 bg-white rounded-full p-0.5" alt="" />
-                                        {tryGetHostname(item.url)}
-                                    </a>
+                                {/* Main Image */}
+                                <motion.img
+                                    layoutId={`image-${item.id}`}
+                                    src={displayImage}
+                                    alt={item.title}
+                                    onLoad={handleImageLoad}
+                                    className="relative z-10 max-w-full max-h-full object-contain rounded-lg shadow-lg ring-1 ring-black/10 dark:ring-white/10"
+                                />
+
+                                {/* Image Metadata Overlay (Desktop) */}
+                                {imageSize && (
+                                    <div className="absolute bottom-4 right-4 px-3 py-1.5 bg-black/60 backdrop-blur-md text-white text-[10px] font-medium rounded-full opacity-0 group-hover:opacity-100 transition-opacity hidden lg:block">
+                                        {imageSize.width} × {imageSize.height}
+                                    </div>
                                 )}
-                            </div>
+                            </>
                         ) : (
-                            <div className="w-full h-full rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center text-neutral-300 p-12 text-center border border-neutral-200">
-                                <FileText className="w-24 h-24 mb-6 opacity-20" />
-                                <p className="text-lg font-medium opacity-50">No visual preview available</p>
+                            <div className="flex flex-col items-center justify-center text-neutral-400 gap-4">
+                                <div className="w-20 h-20 rounded-2xl bg-neutral-200 dark:bg-neutral-800 flex items-center justify-center">
+                                    <ImageIcon className="w-8 h-8 opacity-50" />
+                                </div>
+                                <p className="text-sm font-medium">No preview image</p>
                             </div>
+                        )}
+
+                        {/* Source Floating Pill */}
+                        {item.url && (
+                            <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="absolute bottom-4 left-4 lg:bottom-6 lg:left-6 z-20 bg-white/90 dark:bg-neutral-800/90 backdrop-blur-md border border-white/20 dark:border-neutral-700 text-(--foreground) pl-1.5 pr-4 py-1.5 rounded-full text-xs font-medium shadow-lg hover:scale-105 transition-transform flex items-center gap-2 group/link"
+                            >
+                                <div className="w-6 h-6 rounded-full bg-neutral-100 dark:bg-black flex items-center justify-center overflow-hidden shrink-0">
+                                    {favicon ? (
+                                        <img src={favicon} alt="" className="w-4 h-4 object-cover" />
+                                    ) : (
+                                        <Globe className="w-3.5 h-3.5 text-neutral-500" />
+                                    )}
+                                </div>
+                                <span className="truncate max-w-[150px]">{hostname}</span>
+                                <ExternalLink className="w-3 h-3 opacity-50 group-hover/link:opacity-100 transition-opacity ml-auto" />
+                            </a>
                         )}
                     </div>
                 </div>
 
-                {/* Right: Details & Notes (Sidebar style) */}
-                <div className="w-full flex-1 md:h-full md:w-[35%] bg-[#f8f9fa] dark:bg-dark flex flex-col relative overflow-hidden min-h-0">
-                    <div className="flex-1 overflow-y-auto p-6 md:p-8 no-scrollbar pb-7 overscroll-contain touch-pan-y">
+                {/* --- RIGHT: Details & Notes --- */}
+                <div className="w-full lg:w-[40%] h-[60%] lg:h-full bg-(--background) flex flex-col relative">
 
-                        {/* Meta Header */}
-                        <div className="mb-6 flex justify-between items-start">
-                            <div>
-                                <h2 className="text-2xl font-bold text-neutral-800 dark:text-white leading-tight mb-2">
-                                    {item.title}
-                                </h2>
-                                <div className="flex items-center gap-2 text-xs font-medium text-neutral-400 dark:text-neutral-600">
-                                    <span>{item.created_at ? formatDistanceToNow(new Date(item.created_at), { addSuffix: true }) : 'Just now'}</span>
-                                    {hostname && (
-                                        <>
-                                            <span>•</span>
-                                            <a href={item.url} target="_blank" rel="noreferrer" className="hover:text-primary transition-colors flex items-center gap-1">
-                                                <ExternalLink className="w-3 h-3" />
-                                                {hostname}
-                                            </a>
-                                        </>
-                                    )}
+                    {/* Toolbar Header */}
+                    <div className="h-16 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-6 shrink-0">
+                        <div className="flex items-center gap-2">
+                            <div className="px-2.5 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800 text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
+                                {item.type === 'link' ? <Globe className="w-3 h-3" /> : item.type === 'image' ? <ImageIcon className="w-3 h-3" /> : <Type className="w-3 h-3" />}
+                                {item.meta?.subtype || item.type}
+                            </div>
+                            {price && (
+                                <div className="px-2.5 py-1 rounded-md bg-green-100 dark:bg-green-900/30 text-xs font-bold text-green-700 dark:text-green-400 flex items-center gap-1.5">
+                                    <CreditCard className="w-3 h-3" />
+                                    {currency} {price}
                                 </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                            <button onClick={onClose} className="hidden lg:flex w-8 h-8 items-center justify-center rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-neutral-500">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Scrollable Content */}
+                    <div className="flex-1 overflow-y-auto p-6 space-y-8">
+
+                        {/* Title & Info */}
+                        <div>
+                            <h2 className="text-xl lg:text-2xl font-bold text-(--foreground) leading-tight mb-3">
+                                {item.title}
+                            </h2>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-500 dark:text-neutral-400 font-medium">
+                                <span className="flex items-center gap-1.5 bg-neutral-50 dark:bg-neutral-900 px-2 py-1 rounded-md">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    {item.created_at ? formatDistanceToNow(new Date(item.created_at), { addSuffix: true }) : 'Just now'}
+                                </span>
+                                {item.meta?.site_name && (
+                                    <span className="flex items-center gap-1.5 bg-neutral-50 dark:bg-neutral-900 px-2 py-1 rounded-md">
+                                        <Layout className="w-3.5 h-3.5" />
+                                        {item.meta.site_name}
+                                    </span>
+                                )}
                             </div>
                         </div>
 
-                        {/* TLDR Section */}
-                        {item.summary && (
-                            <div className="mb-8 group">
-                                <div className="flex items-center gap-3 mb-3">
-                                    <h4 className="text-primary text-[10px] font-bold uppercase tracking-widest">TLDR</h4>
-                                    <div className="h-px flex-1 bg-primary/20" />
+                        {/* Summary / Description */}
+                        {(item.summary || item.content) && (
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
+                                    <FileText className="w-3 h-3" />
+                                    About
                                 </div>
-                                <div className="bg-white p-5 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-sm text-neutral-600 text-sm leading-relaxed dark:bg-dark/80">
-                                    {item.summary}
+                                <div className="text-sm leading-relaxed text-neutral-600 dark:text-neutral-300 bg-neutral-50 dark:bg-neutral-900/50 p-4 rounded-xl border border-neutral-100 dark:border-neutral-800">
+                                    {item.summary || item.content?.slice(0, 300)}
                                 </div>
                             </div>
                         )}
 
-                        {/* Tags Section */}
-                        <div className="mb-8">
-                            <div className="flex items-center gap-2 mb-3">
-                                <h4 className="text-neutral-400 text-[10px] font-bold uppercase tracking-widest">Mind Tags</h4>
-                                <div className="w-4 h-4 rounded-full bg-neutral-200 flex items-center justify-center text-[10px] text-neutral-500 font-bold">?</div>
+                        {/* Tags */}
+                        <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
+                                <Tag className="w-3 h-3" />
+                                Tags
                             </div>
-
                             <div className="flex flex-wrap gap-2">
+                                {item.tags?.map((tag, i) => (
+                                    <span
+                                        key={i}
+                                        className="group pl-3 pr-2 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-xs font-medium text-neutral-600 dark:text-neutral-300 flex items-center gap-1 border border-transparent hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-all cursor-pointer"
+                                        onClick={() => handleRemoveTag(tag)}
+                                    >
+                                        {tag.startsWith('#') ? tag : `#${tag}`}
+                                        <X className="w-3 h-3 opacity-0 group-hover:opacity-100" />
+                                    </span>
+                                ))}
+
                                 {isAddingTag ? (
-                                    <div className="flex items-center gap-2 w-full">
-                                        <input
-                                            type="text"
-                                            value={newTag}
-                                            onChange={(e) => setNewTag(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') handleAddTag();
-                                                if (e.key === 'Escape') setIsAddingTag(false);
-                                            }}
-                                            autoFocus
-                                            placeholder="Tag name..."
-                                            className="flex-1 bg-white border border-primary rounded-xl px-3 py-1.5 text-sm focus:outline-none text-neutral-700"
-                                        />
-                                    </div>
+                                    <input
+                                        type="text"
+                                        value={newTag}
+                                        onChange={(e) => setNewTag(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleAddTag();
+                                            if (e.key === 'Escape') setIsAddingTag(false);
+                                        }}
+                                        onBlur={() => { if (!newTag) setIsAddingTag(false); }}
+                                        autoFocus
+                                        className="bg-transparent border border-primary text-primary rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none min-w-[80px]"
+                                        placeholder="New tag..."
+                                    />
                                 ) : (
                                     <button
                                         onClick={() => setIsAddingTag(true)}
-                                        className="px-3 py-1.5 rounded-xl bg-primary text-white text-xs font-bold shadow-sm hover:bg-primary-hover transition-colors flex items-center gap-1"
+                                        className="px-3 py-1.5 rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs font-medium hover:border-primary hover:text-primary transition-colors flex items-center gap-1.5"
                                     >
-                                        <Plus className="w-3 h-3" /> Add tag
+                                        <Plus className="w-3 h-3" /> Add
                                     </button>
                                 )}
-
-                                {item.tags && item.tags.map((tag, i) => (
-                                    <span key={i} className="group px-3 py-1.5 rounded-xl bg-[#e9ecef] dark:bg-neutral-800 dark:text-neutral-300 text-neutral-500 text-xs font-medium hover:bg-red-50 hover:text-red-500 transition-colors cursor-pointer border border-transparent hover:border-red-100 flex items-center gap-1" onClick={() => handleRemoveTag(tag)}>
-                                        {tag.startsWith('#') ? tag.substring(1) : tag}
-                                        <X className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                    </span>
-                                ))}
-                                {/* Type Badge */}
-                                <span className="px-3 py-1.5 rounded-xl bg-white dark:bg-neutral-900 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-800 text-neutral-400 text-xs font-medium flex items-center gap-1">
-                                    {item.type === 'link' ? <Globe className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
-                                    {item.meta?.original_category || item.type}
-                                </span>
                             </div>
                         </div>
 
-                        {/* Notes Section */}
-                        <div className="mb-8">
-                            <div className="flex items-center gap-2 mb-3">
-                                <h4 className="text-neutral-400 text-[10px] font-bold uppercase tracking-widest">Mind Notes</h4>
-                                <div className="w-4 h-4 rounded-full bg-neutral-200 flex items-center justify-center text-[10px] text-neutral-500 font-bold">?</div>
+                        {/* Notes Input */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
+                                <MoreHorizontal className="w-3 h-3" />
+                                Personal Notes
                             </div>
                             <textarea
                                 value={notes}
                                 onChange={(e) => setNotes(e.target.value)}
                                 onBlur={handleNotesBlur}
-                                placeholder="Type here to add a note..."
-                                className="w-full min-h-[120px] bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-4 text-sm text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-300 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all resize-none shadow-sm no-scrollbar"
+                                placeholder="Add your thoughts, ideas, or key takeaways..."
+                                className="w-full min-h-[150px] bg-neutral-50 dark:bg-neutral-900/50 border-0 rounded-xl p-4 text-sm text-(--foreground) placeholder:text-neutral-400 focus:ring-2 focus:ring-primary/20 resize-none transition-all"
                             />
                         </div>
                     </div>
 
-                    {/* Bottom Toolbar (Floating-ish) */}
-                    <div className="p-2 px-3 flex justify-center gap-3 absolute w-fit mx-auto rounded-full bottom-2 left-0 right-0 bg-white/30 dark:bg-neutral-700/30 backdrop-blur-md">
-                        <button className="w-10 h-10 rounded-full bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 shadow-sm flex items-center justify-center text-neutral-400 hover:text-primary hover:border-primary/30 transition-all" title="Share">
-                            <Share2 className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(item.url || item.content || '');
-                                toast.success('Copied to clipboard!');
-                            }}
-                            className="w-10 h-10 rounded-full bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 shadow-sm flex items-center justify-center text-neutral-400 hover:text-primary hover:border-primary/30 transition-all"
-                            title="Copy"
-                        >
-                            <Copy className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={handleDelete}
-                            disabled={isDeleting}
-                            className="w-10 h-10 rounded-full bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 shadow-sm flex items-center justify-center text-neutral-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all disabled:opacity-50"
-                            title="Delete"
-                        >
-                            {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                        </button>
+                    {/* Footer Actions */}
+                    <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 bg-(--background)/80 backdrop-blur-md absolute bottom-0 left-0 right-0">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => {
+                                        if (item.url) {
+                                            navigator.clipboard.writeText(item.url);
+                                            toast.success("Link copied");
+                                        }
+                                    }}
+                                    className="p-2.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors"
+                                    title="Copy Link"
+                                >
+                                    <LinkIcon className="w-4 h-4" />
+                                </button>
+                                <button
+                                    className="p-2.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors"
+                                    title="Share"
+                                >
+                                    <Share2 className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            <button
+                                onClick={handleDelete}
+                                disabled={isDeleting}
+                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400 text-neutral-600 dark:text-neutral-400 text-xs font-bold transition-colors disabled:opacity-50"
+                            >
+                                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                <span>Delete Item</span>
+                            </button>
+                        </div>
                     </div>
+
                 </div>
             </motion.div>
         </motion.div>

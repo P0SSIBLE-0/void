@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { url, type: manualType, note } = validation.data;
-    
+
     // 1. Initialize variables
     let title = note || url;
     let description = "";
@@ -70,19 +70,15 @@ export async function POST(req: NextRequest) {
     let image: string | null = null;
     let meta: any = {};
 
-    // 2. Scrape or Process Input
+    // 2. Scrape or Process Input (Parallel with AI when possible)
+    let scrapePromise: Promise<any> | null = null;
+
     if (manualType === "link") {
-      try {
-        const scraped = await scrapeUrl(url);
-        title = scraped.title || title;
-        description = scraped.description;
-        content = scraped.content;
-        textContent = scraped.textContent;
-        image = scraped.image;
-        meta = scraped.meta;
-      } catch (e) {
+      // Start scraping (don't await yet)
+      scrapePromise = scrapeUrl(url).catch((e) => {
         console.error("Scraping failed, falling back to basic info", e);
-      }
+        return null;
+      });
     } else if (manualType === "text") {
       textContent = note || "";
       content = `<p>${note}</p>`;
@@ -90,20 +86,33 @@ export async function POST(req: NextRequest) {
       meta.subtype = "note";
     }
 
-    // 3. AI Processing
+    // 3. Wait for scraping to complete before AI (AI needs the text content)
     let aiData = { summary: "", tags: [] as string[], category: manualType };
-    
-    // Only process if we have enough text (e.g. > 50 chars)
+
+    if (scrapePromise) {
+      const scraped = await scrapePromise;
+      if (scraped) {
+        title = scraped.title || title;
+        description = scraped.description;
+        content = scraped.content;
+        textContent = scraped.textContent;
+        image = scraped.image;
+        meta = scraped.meta;
+      }
+    }
+
+    // 4. AI Processing (only if we have enough text)
     if (textContent && textContent.length > 50) {
-      const aiResult = await processWithAI(title, textContent);
+      // Run AI processing but limit text to save tokens
+      const aiResult = await processWithAI(title, textContent.slice(0, 600));
       aiData = {
         summary: aiResult.summary,
         tags: aiResult.tags,
         category: aiResult.category,
       };
     } else if (description) {
-        // Fallback: try to use description if text content is empty/short
-        aiData.summary = description;
+      // Fallback: try to use description if text content is empty/short
+      aiData.summary = description;
     }
 
     // 4. Determine DB Type
