@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { Readability } from '@mozilla/readability';
-import { JSDOM } from 'jsdom';
+import { parseHTML } from 'linkedom';
 import {
   extractTitle,
   extractDescription,
@@ -47,12 +47,12 @@ const TIMEOUT_MS = 10000;
 
 export async function scrapeUrl(url: string): Promise<ScrapedData> {
   console.log(`[Scraper] Fetching: ${url}`);
-  
+
   try {
     // 1. Fetch HTML
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    
+
     const response = await fetch(url, {
       headers: {
         'User-Agent': USER_AGENT,
@@ -64,7 +64,7 @@ export async function scrapeUrl(url: string): Promise<ScrapedData> {
     clearTimeout(id);
 
     if (!response.ok && response.status !== 403) { // Allow 403 to try extracting from potential error page content if any, or just fail
-       if (response.status >= 500) throw new Error(`Status ${response.status}`);
+      if (response.status >= 500) throw new Error(`Status ${response.status}`);
     }
 
     const html = await response.text();
@@ -76,27 +76,29 @@ export async function scrapeUrl(url: string): Promise<ScrapedData> {
     const { price, currency } = extractPrice($);
     const image = extractImage($, url);
     const subtype = detectType($, url, price);
-    
+
     // 3. Readability (Conditional)
     let content = '';
     let textContent = '';
     let reading_time = 0;
 
-    // Only run heavy JSDOM/Readability for articles or if description is missing
+    // Only run heavy Readability for articles or if description is missing
     if (subtype === 'article' || (subtype === 'website' && description.length < 50)) {
       try {
-        const dom = new JSDOM(html, { url, runScripts: undefined, resources: undefined });
-        const reader = new Readability(dom.window.document);
+        // Using linkedom instead of jsdom for better serverless compatibility
+        const { document } = parseHTML(html);
+
+        // Cast linkedom document to any because Readability types expect strict DOM Document
+        const reader = new Readability(document as any);
         const article = reader.parse();
-        
+
         if (article) {
           content = article.content || '';
           textContent = article.textContent || '';
           reading_time = estimateReadingTime(textContent);
         }
-        dom.window.close();
       } catch (e) {
-        console.warn('[Scraper] Readability failed, falling back to body text');
+        console.warn('[Scraper] Readability failed, falling back to body text', e);
       }
     }
 
