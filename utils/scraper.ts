@@ -1,21 +1,50 @@
-import chromium from "@sparticuz/chromium-min";
-import puppeteerCore from "puppeteer-core";
-import puppeteer from "puppeteer";
 import * as cheerio from 'cheerio';
+import { Readability } from '@mozilla/readability';
+import { JSDOM } from 'jsdom';
+
+// --- Types ---
+
+export interface ScrapedData {
+  url: string;
+  title: string;
+  description: string;
+  image: string | null;
+  type: 'link' | 'image' | 'text' | 'pdf';
+  content: string; // Cleaned HTML
+  textContent: string; // Cleaned Text (for AI)
+  
+  // Enhanced Meta (to be stored in jsonb)
+  meta: {
+    subtype?: 'article' | 'product' | 'video' | 'website' | 'tool';
+    site_name?: string;
+    favicon?: string;
+    canonical_url?: string;
+    price?: string;
+    currency?: string;
+    author?: string;
+    published_time?: string;
+    reading_time?: number;
+    has_code?: boolean;
+    video_url?: string;
+  };
+}
 
 // --- Configuration ---
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const TIMEOUT_MS = 9000;
 
-// Limits
-const LIMITS = {
-  TITLE: 100,
-  DESCRIPTION: 300,
-  TEXT: 2000,
-};
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const TIMEOUT_MS = 10000;
 
 // --- Helpers ---
+
+function normalizeUrl(url: string | undefined | null, baseUrl: string): string | null {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    if (url.startsWith('data:')) return null; // Skip data URIs for main images usually
+    return new URL(url, baseUrl).href;
+  } catch {
+    return null;
+  }
+}
 
 function truncate(str: string | undefined | null, length: number): string {
   if (!str) return '';
@@ -23,284 +52,234 @@ function truncate(str: string | undefined | null, length: number): string {
   return cleaned.length > length ? cleaned.substring(0, length) + '...' : cleaned;
 }
 
-function normalizeUrl(url: string | undefined | null, baseUrl: string): string | null {
-  if (!url || typeof url !== 'string') return null;
-  try {
-    if (url.startsWith('data:')) return null;
-    if (url.startsWith('//')) return `https:${url}`;
-    return new URL(url, baseUrl).href;
-  } catch {
-    return null;
+function estimateReadingTime(text: string): number {
+  const wordsPerMinute = 200;
+  const words = text.trim().split(/\s+/).length;
+  return Math.ceil(words / wordsPerMinute);
+}
+
+// --- Extraction Logic ---
+
+function extractPrice($: cheerio.CheerioAPI): { price?: string; currency?: string } {
+  // 1. OpenGraph / Meta tags
+  let price = $('meta[property="product:price:amount"]').attr('content') ||
+              $('meta[property="og:price:amount"]').attr('content');
+  let currency = $('meta[property="product:price:currency"]').attr('content') ||
+                 $('meta[property="og:price:currency"]').attr('content') ||
+                 'USD';
+
+  // 2. JSON-LD (Product)
+  if (!price) {
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html() || '{}');
+        const items = Array.isArray(json) ? json : [json];
+        for (const item of items) {
+          if (item['@type'] === 'Product' && item.offers) {
+            const offer = Array.isArray(item.offers) ? item.offers[0] : item.offers;
+            if (offer.price) {
+              price = offer.price;
+              currency = offer.priceCurrency || currency;
+              return false; // break
+            }
+          }
+        }
+      } catch {}
+    });
   }
+  
+  return { price: price ? String(price) : undefined, currency: currency ? String(currency) : undefined };
 }
 
-function getDirectImage(url: string): string | null {
-  try {
-    const u = new URL(url);
-    // YouTube
-    if (u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be')) {
-      const v = u.searchParams.get('v') || u.pathname.split('/').pop();
-      if (v && v.length === 11) return `https://img.youtube.com/vi/${v}/maxresdefault.jpg`;
-    }
-    // Google Image Search
-    if (u.hostname.includes('google') && u.searchParams.get('imgurl')) {
-      return u.searchParams.get('imgurl');
-    }
-  } catch { }
-  return null;
+function extractImage($: cheerio.CheerioAPI, baseUrl: string): string | null {
+  // 1. Open Graph (Highest Priority)
+  let image = $('meta[property="og:image"]').attr('content') ||
+              $('meta[property="og:image:secure_url"]').attr('content') ||
+              $('meta[name="twitter:image"]').attr('content') ||
+              $('meta[name="twitter:image:src"]').attr('content');
+
+  // 2. Link Rel
+  if (!image) image = $('link[rel="image_src"]').attr('href');
+
+  // 3. JSON-LD
+  if (!image) {
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html() || '{}');
+        const items = Array.isArray(json) ? json : [json];
+        for (const item of items) {
+          if (item.image) {
+             const img = Array.isArray(item.image) ? item.image[0] : item.image;
+             if (typeof img === 'string') image = img;
+             else if (img.url) image = img.url;
+             if (image) return false;
+          }
+        }
+      } catch {}
+    });
+  }
+
+  // 4. Largest Image on Page (Fallback)
+  if (!image) {
+    let maxScore = 0;
+    $('img').each((_, el) => {
+      const src = $(el).attr('src');
+      if (!src || src.endsWith('.svg') || src.startsWith('data:')) return;
+      
+      // Simple heuristic scoring
+      let width = parseInt($(el).attr('width') || '0');
+      let height = parseInt($(el).attr('height') || '0');
+      
+      // If no dimensions, assume it's small unless it's in a main container
+      let score = width * height;
+      
+      // Boost if inside generic main containers
+      if ($(el).parents('article, main, [role="main"]').length > 0) score += 10000;
+      
+      // Penalize if in nav/footer
+      if ($(el).parents('nav, footer, header, aside').length > 0) score -= 10000;
+
+      if (score > maxScore) {
+        maxScore = score;
+        image = src;
+      }
+    });
+  }
+
+  return normalizeUrl(image, baseUrl);
 }
 
-// --- Level 1: Fast Scrape (Fetch + Cheerio) ---
+function detectType($: cheerio.CheerioAPI, url: string, price?: string): ScrapedData['meta']['subtype'] {
+  const ogType = $('meta[property="og:type"]').attr('content');
+  
+  // 1. Explicit Video
+  if (ogType?.includes('video') || url.match(/(youtube\.com|vimeo\.com|youtu\.be)/)) return 'video';
+  
+  // 2. Product (has price or type=product)
+  if (price || ogType === 'product') return 'product';
+  
+  // 3. Article
+  if (ogType === 'article') return 'article';
+  
+  // 4. Tool detection (Naive heuristic)
+  const title = $('title').text().toLowerCase();
+  const desc = $('meta[name="description"]').attr('content')?.toLowerCase() || '';
+  if (
+    title.includes('generator') || title.includes('converter') || title.includes('calculator') || 
+    title.includes('formatter') || desc.includes('tool to') || desc.includes('online tool')
+  ) {
+    return 'tool';
+  }
 
-async function fastScrape(url: string) {
+  return 'website';
+}
+
+// --- Main Function ---
+
+export async function scrapeUrl(url: string): Promise<ScrapedData> {
+  console.log(`[Scraper] Fetching: ${url}`);
+  
   try {
-    console.log(`[FastScrape] Attempting: ${url}`);
+    // 1. Fetch HTML
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 5000); // 5s timeout
-
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    
     const response = await fetch(url, {
       headers: {
         'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5'
       },
       signal: controller.signal
     });
-    clearTimeout(id);
+    clearTimeout(timeoutId);
 
-    if (response.headers.get('content-type')?.startsWith('image/')) {
-      return { title: 'Image', description: 'Direct Image', image: url, text: '' };
-    }
-
-    if (!response.ok) {
-      if (response.status === 403 || response.status === 401) {
-        console.warn(`[FastScrape] Blocked (${response.status}), escalating.`);
-        return null;
-      }
-      throw new Error(`Status ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
     const html = await response.text();
-
-    // Dribbble and similar SPAs often return a shell
-    if (html.length < 2000 && !html.includes('<article')) {
-      console.log('[FastScrape] HTML too short/empty, escalating.');
-      return null;
-    }
-
+    
+    // 2. Load into Cheerio (for fast meta parsing)
     const $ = cheerio.load(html);
-
-    const title = truncate(
-      $('meta[property="og:title"]').attr('content') || $('title').text(),
-      LIMITS.TITLE
-    );
-    const description = truncate(
-      $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content'),
-      LIMITS.DESCRIPTION
-    );
-
-    let image = $('meta[property="og:image"]').attr('content') ||
-      $('meta[name="twitter:image"]').attr('content');
-
-    if (!image) {
-      $('script[type="application/ld+json"]').each((_, el) => {
-        if (image) return;
-        try {
-          const json = JSON.parse($(el).html() || '{}');
-          const entities = Array.isArray(json) ? json : [json];
-          for (const e of entities) {
-            if (e.image) {
-              const i = e.image.url || e.image;
-              if (typeof i === 'string') { image = i; break; }
-            }
-          }
-        } catch { }
-      });
+    
+    // 3. Basic Meta
+    const title = $('meta[property="og:title"]').attr('content') || 
+                  $('title').text() || 
+                  'Untitled';
+                  
+    const description = $('meta[property="og:description"]').attr('content') || 
+                        $('meta[name="description"]').attr('content') || 
+                        '';
+                        
+    const site_name = $('meta[property="og:site_name"]').attr('content');
+    const canonical_url = $('link[rel="canonical"]').attr('href') || url;
+    const author = $('meta[name="author"]').attr('content') || $('meta[property="article:author"]').attr('content');
+    const published_time = $('meta[property="article:published_time"]').attr('content');
+    
+    // 4. Favicon
+    let faviconUrl = $('link[rel="icon"]').attr('href') || 
+                  $('link[rel="shortcut icon"]').attr('href') || 
+                  $('link[rel="apple-touch-icon"]').attr('href');
+    let favicon = normalizeUrl(faviconUrl, url);
+    if (!favicon) {
+      // Fallback to default /favicon.ico
+      try {
+        favicon = new URL('/favicon.ico', url).href;
+      } catch {}
     }
 
-    if (!image) {
-      let maxScore = 0;
-      $('img').each((_, el) => {
-        const src = $(el).attr('src');
-        if (!src || src.endsWith('.svg')) return;
-        let score = 0;
-        if ($(el).attr('width')) score += 10;
-        if ($(el).parents('article, main').length) score += 20;
-        if (score > maxScore) { maxScore = score; image = src; }
-      });
-    }
+    // 5. Specialized Extraction
+    const { price, currency } = extractPrice($);
+    const image = extractImage($, url);
+    const subtype = detectType($, url, price);
+    const has_code = $('pre code').length > 0;
 
-    $('script, style, nav, footer, header, aside, svg').remove();
-    const text = truncate($('body').text(), LIMITS.TEXT);
+    // 6. Readability (Content Cleaning)
+    // We use JSDOM here because Readability expects a DOM document
+    const dom = new JSDOM(html, { url });
+    const reader = new Readability(dom.window.document);
+    const article = reader.parse();
+    
+    // If Readability failed, fallback to body text
+    const content = (article ? article.content : $('body').html()) || '';
+    const textContent = (article ? article.textContent : $('body').text()) || '';
+    const reading_time = estimateReadingTime(textContent);
 
-    if (!title || title === 'Untitled' || text.length < 100) {
-      console.log('[FastScrape] Content insufficient, escalating.');
-      return null;
-    }
-
+    // 7. Construct Final Object
     return {
-      title: title || 'Untitled',
-      description: description || '',
-      image: normalizeUrl(image, url),
-      text
-    };
-
-  } catch (e) {
-    console.warn(`[FastScrape] Failed: ${e}`);
-    return null;
-  }
-}
-
-// --- Level 2: Deep Scrape (Puppeteer) ---
-
-async function getBrowser() {
-  console.log(`[getBrowser] IS_PRODUCTION: ${IS_PRODUCTION}, NODE_ENV: ${process.env.NODE_ENV}`);
-
-  if (IS_PRODUCTION) {
-    try {
-      chromium.setGraphicsMode = false;
-      const executablePath = await chromium.executablePath(
-        "https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar"
-      );
-      console.log(`[getBrowser] Executable path: ${executablePath}`);
-
-      return await puppeteerCore.launch({
-        args: chromium.args,
-        defaultViewport: { width: 1280, height: 720 },
-        executablePath: executablePath,
-        headless: chromium.headless,
-      });
-    } catch (error) {
-      console.error("[getBrowser] Failed to launch production browser (chromium). This is expected if running locally with NODE_ENV=production. Falling back to local puppeteer.", error);
-      // Fallback to local puppeteer
-      return await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled'
-        ]
-      });
-    }
-  } else {
-    return await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled'
-      ]
-    });
-  }
-}
-
-async function deepScrape(url: string) {
-  console.log(`[DeepScrape] Launching browser for: ${url}`);
-  let browser;
-  try {
-    browser = await getBrowser();
-    const page = await browser.newPage();
-    await page.setUserAgent(USER_AGENT);
-    await page.setViewport({ width: 1440, height: 900 });
-
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const type = req.resourceType();
-      if (['font', 'media', 'stylesheet'].includes(type)) req.abort();
-      else req.continue();
-    });
-
-    // Use networkidle2 for better SPA support
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
-    try {
-      await page.waitForSelector('body', { timeout: 5000 });
-    } catch { }
-
-    // Evaluate with NO internal function definitions to avoid __name issues
-    const data = await page.evaluate(() => {
-      // Inline logic only
-      const title = document.querySelector('meta[property="og:title"]')?.getAttribute('content') || document.title;
-
-      const description = document.querySelector('meta[property="og:description"]')?.getAttribute('content') ||
-        document.querySelector('meta[name="description"]')?.getAttribute('content');
-
-      let image = document.querySelector('meta[property="og:image"]')?.getAttribute('content') ||
-        document.querySelector('meta[name="twitter:image"]')?.getAttribute('content');
-
-      if (!image) {
-        const imgs = Array.from(document.querySelectorAll('img'));
-        let bestImg = null;
-        let maxScore = 0;
-
-        for (const img of imgs) {
-          if (img.src.endsWith('.svg') || img.src.startsWith('data:')) continue;
-
-          const rect = img.getBoundingClientRect();
-          if (rect.width < 50 || rect.height < 50) continue;
-
-          let score = (rect.width * rect.height);
-          if (rect.top < 800) score += 5000;
-          if (img.closest('main, article')) score += 5000;
-          if (img.closest('header, nav, footer')) score -= 5000;
-
-          if (score > maxScore) {
-            maxScore = score;
-            bestImg = img.src;
-          }
-        }
-        image = bestImg;
+      url,
+      type: 'link', // Default DB type
+      title: truncate(title, 200),
+      description: truncate(description, 500),
+      content: content, // This is the cleaned HTML
+      textContent: textContent,
+      image: image,
+      meta: {
+        subtype,
+        site_name,
+        favicon: favicon || undefined,
+        canonical_url,
+        price,
+        currency,
+        author,
+        published_time,
+        reading_time,
+        has_code,
+        video_url: subtype === 'video' ? url : undefined // Simple assumption
       }
-
-      // 5. Text Content
-      // Cleanup for text
-      const bodyClone = document.body.cloneNode(true) as HTMLElement;
-
-      // Aggressive cleanup of UI elements
-      const trash = bodyClone.querySelectorAll(
-        'script, style, nav, footer, header, aside, svg, noscript, ' +
-        '[role="navigation"], [role="banner"], [role="contentinfo"], ' +
-        '.nav, .header, .footer, .menu, .sidebar, .ad, .banner, .cookie, .popup, .modal'
-      );
-      trash.forEach(n => n.remove());
-
-      const text = bodyClone.innerText.replace(/\s+/g, ' ').trim().substring(0, 8000);
-
-      return { title, description, image, text };
-    });
-
-    return {
-      title: truncate(data.title, LIMITS.TITLE) || 'Untitled',
-      description: truncate(data.description, LIMITS.DESCRIPTION) || '',
-      image: normalizeUrl(data.image, url),
-      text: data.text || ''
     };
 
   } catch (error) {
-    console.error(`[DeepScrape] Failed: ${error}`);
-    return { title: 'Saved Link', description: '', image: null, text: '' };
-  } finally {
-    if (browser) await browser.close();
+    console.error(`[Scraper] Error scraping ${url}:`, error);
+    
+    // Fallback for errors
+    return {
+      url,
+      type: 'link',
+      title: url,
+      description: 'Failed to scrape content',
+      image: null,
+      content: '',
+      textContent: '',
+      meta: { subtype: 'website' }
+    };
   }
-}
-
-// --- Main Orchestrator ---
-
-export async function scrapeUrl(url: string) {
-  // 1. Special Direct Patterns
-  const direct = getDirectImage(url);
-  if (direct) return { title: 'Media', description: '', image: direct, text: '' };
-
-  // 2. Try Fast Scrape
-  const fastResult = await fastScrape(url);
-
-  if (fastResult && fastResult.title && fastResult.title !== 'Untitled' && (fastResult.image || fastResult.text.length > 500)) {
-    return fastResult;
-  }
-
-  // 3. Fallback to Deep Scrape
-  console.log(`[Orchestrator] Fast scrape insufficient for ${url}, falling back to Deep Scrape.`);
-  return await deepScrape(url);
 }

@@ -61,36 +61,59 @@ export async function POST(req: NextRequest) {
     }
 
     const { url, type: manualType, note } = validation.data;
-    let scrapedData = {
-      title: note || url,
-      description: "",
-      image: null as string | null,
-      text: "",
-    };
+    
+    // 1. Initialize variables
+    let title = note || url;
+    let description = "";
+    let content = "";     // HTML content for Reader Mode
+    let textContent = ""; // Plain text for AI analysis
+    let image: string | null = null;
+    let meta: any = {};
 
+    // 2. Scrape or Process Input
     if (manualType === "link") {
-      scrapedData = await scrapeUrl(url);
+      try {
+        const scraped = await scrapeUrl(url);
+        title = scraped.title || title;
+        description = scraped.description;
+        content = scraped.content;
+        textContent = scraped.textContent;
+        image = scraped.image;
+        meta = scraped.meta;
+      } catch (e) {
+        console.error("Scraping failed, falling back to basic info", e);
+      }
     } else if (manualType === "text") {
-      scrapedData.text = note || "";
-      scrapedData.title = "Note";
+      textContent = note || "";
+      content = `<p>${note}</p>`;
+      title = "Note";
+      meta.subtype = "note";
     }
 
+    // 3. AI Processing
     let aiData = { summary: "", tags: [] as string[], category: manualType };
-
-    // Skip AI if text is too short OR if we suspect quota issues (optional optimization)
-    if (scrapedData.text.length > 50) {
-      const aiResult = await processWithAI(scrapedData.title, scrapedData.text);
+    
+    // Only process if we have enough text (e.g. > 50 chars)
+    if (textContent && textContent.length > 50) {
+      const aiResult = await processWithAI(title, textContent);
       aiData = {
         summary: aiResult.summary,
         tags: aiResult.tags,
-        category: manualType === "link" ? "link" : manualType,
+        category: aiResult.category,
       };
+    } else if (description) {
+        // Fallback: try to use description if text content is empty/short
+        aiData.summary = description;
     }
 
+    // 4. Determine DB Type
+    // We try to map our detected subtype to the DB enum ('link', 'image', 'text', 'pdf')
     let dbType = "link";
     if (manualType === "image") dbType = "image";
     else if (manualType === "text") dbType = "text";
+    // If scraper detected PDF, etc., we could switch dbType here if valid in Enum
 
+    // 5. Insert into Database
     const { data, error: dbError } = await supabase
       .from("items")
       .insert([
@@ -98,14 +121,15 @@ export async function POST(req: NextRequest) {
           user_id: user.id,
           url: url,
           type: dbType,
-          title: scrapedData.title,
-          description: scrapedData.description,
-          content: scrapedData.text,
+          title: title,
+          description: description,
+          content: content, // Storing HTML
           summary: aiData.summary,
           tags: aiData.tags,
           meta: {
-            image: scrapedData.image,
-            original_category: aiData.category,
+            ...meta, // Spread scraper meta (price, subtype, etc.)
+            image: image, // Ensure image is top-level in meta for easy access
+            ai_category: aiData.category, // Store what AI thought it was
           },
         },
       ])
