@@ -1,4 +1,4 @@
-import chromium from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium-min";
 import puppeteerCore from "puppeteer-core";
 import puppeteer from "puppeteer";
 import * as cheerio from 'cheerio';
@@ -159,14 +159,16 @@ async function getBrowser() {
   if (IS_PRODUCTION) {
     try {
       chromium.setGraphicsMode = false;
-      const executablePath = await chromium.executablePath();
+      const executablePath = await chromium.executablePath(
+        "https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar"
+      );
       console.log(`[getBrowser] Executable path: ${executablePath}`);
 
       return await puppeteerCore.launch({
         args: chromium.args,
         defaultViewport: { width: 1280, height: 720 },
         executablePath: executablePath,
-        headless: true,
+        headless: chromium.headless,
       });
     } catch (error) {
       console.error("[getBrowser] Failed to launch production browser (chromium). This is expected if running locally with NODE_ENV=production. Falling back to local puppeteer.", error);
