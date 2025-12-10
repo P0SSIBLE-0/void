@@ -45,12 +45,13 @@ export async function PATCH(
     }
 
     const body = await req.json();
-    
-    // Allow updating content (notes), tags, or title
-    const updates: any = {};
+
+    // Allow updating content (notes), tags, title, or category
+    const updates: Record<string, unknown> = {};
     if (typeof body.content === 'string') updates.content = body.content;
     if (Array.isArray(body.tags)) updates.tags = body.tags;
     if (typeof body.title === 'string') updates.title = body.title;
+    if (body.category_id !== undefined) updates.category_id = body.category_id; // null allowed
 
     const { data, error } = await supabase
       .from('items')

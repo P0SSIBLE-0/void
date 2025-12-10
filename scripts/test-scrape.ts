@@ -1,55 +1,43 @@
 import { scrapeUrl } from '../utils/scraper';
+import * as fs from 'fs';
 
 const urls = [
-  'https://medium.com/@wlockett/the-ai-bubble-is-about-to-burst-but-the-next-bubble-is-already-growing-383c0c0c7ede', // Article
-  'https://www.imdb.com/title/tt27988879/', // movie
-  'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Video
-  'https://squoosh.app/', // Tool
-  'https://github.com/facebook/react', // Code/Repo
-  'https://www.flipkart.com/realme-gt-8-pro/p/itm78c31e0a1941f', // Product Page
-  'https://dribbble.com/shots/26799571-Crypto-Mobile-App-UI-Design', // Design website, // can't scrape bot detected return error 202
+  'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  'https://github.com/facebook/react',
+  'https://www.behance.net/gallery/238650461/Daily-Quest-Solo-Leveling-Inspired-App-Concept/modules/1373478579',
+  'https://www.amazon.com/dp/B0D1XD1ZV3',
+  'https://twitter.com/elonmusk/status/1866025888016605281',
+  'https://www.flipkart.com/apple-iphone-15/p/itm6ac6485515ae4',
 ];
 
-async function checkImage(url: string | null): Promise<boolean> {
-  if (!url) return false;
-  try {
-    const res = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': 'Mozilla/5.0' } });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function run() {
-  console.log('Starting Scraper Test...\n');
+async function test() {
+  const results: string[] = [];
+  results.push('=== SCRAPER TEST RESULTS ===\n');
 
   for (const url of urls) {
-    console.log(`\n👉 Testing: ${url}`);
+    results.push(`\n--- ${url.substring(0, 50)}... ---`);
     const start = Date.now();
+
     try {
       const data = await scrapeUrl(url);
-      const duration = Date.now() - start;
+      const time = Date.now() - start;
 
-      console.log(`✅ Scraped in ${duration}ms`);
-      console.log(`   Title:       ${data.title}`);
-      console.log(`   Description: ${data.description ? data.description.substring(0, 100) + '...' : 'NULL'}`);
-      console.log(`   Subtype:     ${data.meta.subtype}`);
-      console.log(`   Image:       ${data.image ? data.image.substring(0, 60) + '...' : 'NULL'}`);
-
-      if (data.image) {
-        const isImageValid = await checkImage(data.image);
-        console.log(`   Image Status: ${isImageValid ? '✅ Accessible' : '❌ Broken/Unreachable'}`);
-      }
-
-      console.log(`   Price:       ${data.meta.price || 'N/A'} ${data.meta.currency || ''}`);
-      console.log(`   Favicon:     ${data.meta.favicon ? '✅ Found' : '❌ Missing'}`);
-      console.log(`   Text Length: ${data.textContent.length} chars`);
-      console.log(`   Code:        ${data.meta.has_code ? 'Yes' : 'No'}`);
-
-    } catch (e) {
-      console.error(`❌ Failed:`, e);
+      results.push(`Time: ${time}ms`);
+      results.push(`Title: ${data.title.substring(0, 60)}`);
+      results.push(`Type: ${data.meta.contentType}`);
+      results.push(`Description: ${data.description ? data.description.substring(0, 80) + '...' : 'NONE'}`);
+      results.push(`Image: ${data.image ? 'YES (' + data.image.substring(0, 40) + '...)' : 'NONE'}`);
+      results.push(`Price: ${data.meta.price || 'N/A'} ${data.meta.currency || ''}`);
+      results.push(`Favicon: ${data.meta.favicon ? 'YES' : 'NO'}`);
+    } catch (e: unknown) {
+      results.push(`ERROR: ${e instanceof Error ? e.message : 'Unknown'}`);
     }
   }
+
+  const output = results.join('\n');
+  console.log(output);
+  fs.writeFileSync('test-results.txt', output);
+  console.log('\n\nResults saved to test-results.txt');
 }
 
-run();
+test();

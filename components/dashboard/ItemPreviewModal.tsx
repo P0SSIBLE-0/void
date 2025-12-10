@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import * as motion from "motion/react-client";
 import {
-    Globe, FileText, Search, X, Link as LinkIcon, Calendar, Tag, ExternalLink,
-    Copy, Share2, Trash2, Clock, Plus, Loader2, Image as ImageIcon, Type, MoreHorizontal, CreditCard, Layout
+    Globe, FileText, X, Link as LinkIcon, Calendar, Tag, ExternalLink,
+    Trash2, Plus, Loader2, Image as ImageIcon, Type, MoreHorizontal, CreditCard, Layout, Folder
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from 'date-fns';
-import { Item } from "@/types/item";
+import { Item, Category } from "@/types/item";
+import { CategorySelector } from "./CategorySelector";
+import { ConfirmDialog, Modal } from "@/components/ui/Modal";
 
 // --- Helper Functions ---
 function tryGetHostname(url: string) {
@@ -18,7 +20,8 @@ function tryGetHostname(url: string) {
 }
 
 function getFaviconUrl(item: Item): string {
-    if (item.meta?.favicon) return item.meta.favicon;
+    const meta = item.meta as Record<string, unknown> | undefined;
+    if (meta?.favicon) return meta.favicon as string;
     if (item.url) {
         try {
             const url = new URL(item.url);
@@ -28,26 +31,37 @@ function getFaviconUrl(item: Item): string {
     return "";
 }
 
-// --- Components ---
+// --- Props Types ---
+interface ItemPreviewModalProps {
+    item: Item | null;
+    isOpen: boolean;
+    onClose: () => void;
+    onUpdate: (id: string | number, updates: Partial<Item>) => void;
+    onDelete: (id: string | number) => void;
+    categories: Category[];
+    onUpdateCategory: (id: string | number, categoryId: string | null) => Promise<void>;
+    onCreateCategory: (name: string, color: string) => Promise<Category>;
+    getCategoryById: (id: string | null | undefined) => Category | null;
+}
 
+// --- Component ---
 export const ItemPreviewModal = ({
     item: initialItem,
     isOpen,
     onClose,
     onUpdate,
-    onDelete
-}: {
-    item: Item | null,
-    isOpen: boolean,
-    onClose: () => void,
-    onUpdate: (id: string | number, updates: Partial<Item>) => void,
-    onDelete: (id: string | number) => void
-}) => {
+    onDelete,
+    categories,
+    onUpdateCategory,
+    onCreateCategory,
+    getCategoryById
+}: ItemPreviewModalProps) => {
     const [item, setItem] = useState<Item | null>(initialItem);
     const [notes, setNotes] = useState(initialItem?.content || "");
     const [newTag, setNewTag] = useState("");
     const [isDeleting, setIsDeleting] = useState(false);
-    const [isAddingTag, setIsAddingTag] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [showAddTagModal, setShowAddTagModal] = useState(false);
     const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
     useEffect(() => {
@@ -57,11 +71,13 @@ export const ItemPreviewModal = ({
 
     if (!isOpen || !item) return null;
 
-    const displayImage = item.image || item.meta?.image;
+    const meta = item.meta as Record<string, unknown> | undefined;
+    const displayImage = item.image || meta?.image as string | undefined;
     const hostname = item.url ? tryGetHostname(item.url) : '';
     const favicon = getFaviconUrl(item);
-    const price = item.meta?.price;
-    const currency = item.meta?.currency || '';
+    const price = meta?.price as string | undefined;
+    const currency = (meta?.currency as string) || '';
+    const currentCategory = getCategoryById(item.category_id);
 
     // --- Handlers ---
 
@@ -98,7 +114,7 @@ export const ItemPreviewModal = ({
                 setItem({ ...item, tags: updatedTags });
                 onUpdate(item.id, { tags: updatedTags });
                 setNewTag("");
-                setIsAddingTag(false);
+                setShowAddTagModal(false);
                 toast.success("Tag added");
             }
         } catch (error) {
@@ -121,8 +137,12 @@ export const ItemPreviewModal = ({
         }
     };
 
+    const handleCategoryChange = async (categoryId: string | null) => {
+        await onUpdateCategory(item.id, categoryId);
+        setItem({ ...item, category_id: categoryId });
+    };
+
     const handleDelete = async () => {
-        if (!confirm("Are you sure you want to delete this item?")) return;
         setIsDeleting(true);
         try {
             const res = await fetch(`/api/items/${item.id}`, { method: 'DELETE' });
@@ -159,10 +179,10 @@ export const ItemPreviewModal = ({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-(--background) w-full max-w-6xl h-[90vh] sm:h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row border border-neutral-200 dark:border-neutral-800 ring-1 ring-black/5"
+                className="bg-white dark:bg-neutral-950 w-full max-w-6xl h-[90vh] sm:h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row border border-neutral-200 dark:border-neutral-800"
             >
                 {/* --- LEFT: Visual Content --- */}
-                <div className="w-full lg:w-[60%] h-[40%] lg:h-full bg-neutral-100/50 dark:bg-neutral-900/50 relative flex flex-col border-b lg:border-b-0 lg:border-r border-neutral-200 dark:border-neutral-800">
+                <div className="w-full lg:w-[60%] h-[40%] lg:h-full bg-neutral-100 dark:bg-neutral-900 relative flex flex-col border-b lg:border-b-0 lg:border-r border-neutral-200 dark:border-neutral-800">
 
                     {/* Header (Mobile Only Close) */}
                     <div className="absolute top-4 right-4 z-20 lg:hidden">
@@ -216,13 +236,13 @@ export const ItemPreviewModal = ({
                                 href={item.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="absolute bottom-4 left-4 lg:bottom-6 lg:left-6 z-20 bg-white/90 dark:bg-neutral-800/90 backdrop-blur-md border border-white/20 dark:border-neutral-700 text-(--foreground) pl-1.5 pr-4 py-1.5 rounded-full text-xs font-medium shadow-lg hover:scale-105 transition-transform flex items-center gap-2 group/link"
+                                className="absolute bottom-4 left-4 lg:bottom-6 lg:left-6 z-20 bg-white/90 dark:bg-neutral-800/90 backdrop-blur-md border border-white/20 dark:border-neutral-700 text-(--foreground) dark:text-neutral-100 pl-1.5 pr-4 py-1.5 rounded-full text-xs font-medium shadow-lg hover:scale-x-105 transition-transform flex items-center gap-2 group/link"
                             >
                                 <div className="w-6 h-6 rounded-full bg-neutral-100 dark:bg-black flex items-center justify-center overflow-hidden shrink-0">
                                     {favicon ? (
-                                        <img src={favicon} alt="" className="w-4 h-4 object-cover" />
+                                        <img src={favicon} alt="" className="size-4 object-cover" />
                                     ) : (
-                                        <Globe className="w-3.5 h-3.5 text-neutral-500" />
+                                        <Globe className="size-4 text-neutral-500" />
                                     )}
                                 </div>
                                 <span className="truncate max-w-[150px]">{hostname}</span>
@@ -233,14 +253,14 @@ export const ItemPreviewModal = ({
                 </div>
 
                 {/* --- RIGHT: Details & Notes --- */}
-                <div className="w-full lg:w-[40%] h-[60%] lg:h-full bg-(--background) flex flex-col relative">
+                <div className="w-full lg:w-[40%] h-[60%] lg:h-full bg-white dark:bg-neutral-950 flex flex-col relative">
 
                     {/* Toolbar Header */}
                     <div className="h-16 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-6 shrink-0">
                         <div className="flex items-center gap-2">
                             <div className="px-2.5 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800 text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
                                 {item.type === 'link' ? <Globe className="w-3 h-3" /> : item.type === 'image' ? <ImageIcon className="w-3 h-3" /> : <Type className="w-3 h-3" />}
-                                {item.meta?.subtype || item.type}
+                                {(meta?.subtype as string) || item.type}
                             </div>
                             {price && (
                                 <div className="px-2.5 py-1 rounded-md bg-green-100 dark:bg-green-900/30 text-xs font-bold text-green-700 dark:text-green-400 flex items-center gap-1.5">
@@ -262,7 +282,7 @@ export const ItemPreviewModal = ({
 
                         {/* Title & Info */}
                         <div>
-                            <h2 className="text-xl lg:text-2xl font-bold text-(--foreground) leading-tight mb-3">
+                            <h2 className="text-xl lg:text-2xl font-bold text-(--foreground) dark:text-neutral-100 leading-tight mb-3">
                                 {item.title}
                             </h2>
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-500 dark:text-neutral-400 font-medium">
@@ -270,13 +290,27 @@ export const ItemPreviewModal = ({
                                     <Calendar className="w-3.5 h-3.5" />
                                     {item.created_at ? formatDistanceToNow(new Date(item.created_at), { addSuffix: true }) : 'Just now'}
                                 </span>
-                                {item.meta?.site_name && (
+                                {typeof meta?.site_name === 'string' && (
                                     <span className="flex items-center gap-1.5 bg-neutral-50 dark:bg-neutral-900 px-2 py-1 rounded-md">
                                         <Layout className="w-3.5 h-3.5" />
-                                        {item.meta.site_name}
+                                        {meta.site_name}
                                     </span>
                                 )}
                             </div>
+                        </div>
+
+                        {/* Category Selector */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
+                                <Folder className="w-3 h-3" />
+                                Folder
+                            </div>
+                            <CategorySelector
+                                categories={categories}
+                                selectedId={item.category_id || null}
+                                onSelect={handleCategoryChange}
+                                onCreate={onCreateCategory}
+                            />
                         </div>
 
                         {/* Summary / Description */}
@@ -294,49 +328,41 @@ export const ItemPreviewModal = ({
 
                         {/* Tags */}
                         <div className="space-y-3">
-                            <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
-                                <Tag className="w-3 h-3" />
-                                Tags
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
+                                    <Tag className="w-3 h-3" />
+                                    Tags
+                                </div>
+                                <button
+                                    onClick={() => setShowAddTagModal(true)}
+                                    className="text-xs text-orange-500 hover:text-orange-600 font-medium flex items-center gap-1"
+                                >
+                                    <Plus className="w-3 h-3" /> Add
+                                </button>
                             </div>
                             <div className="flex flex-wrap gap-2">
                                 {item.tags?.map((tag, i) => (
                                     <span
                                         key={i}
-                                        className="group pl-3 pr-2 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-xs font-medium text-neutral-600 dark:text-neutral-300 flex items-center gap-1 border border-transparent hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-all cursor-pointer"
-                                        onClick={() => handleRemoveTag(tag)}
+                                        className="group pl-3 pr-1.5 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-xs font-medium text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5"
                                     >
-                                        {tag.startsWith('#') ? tag : `#${tag}`}
-                                        <X className="w-3 h-3 opacity-0 group-hover:opacity-100" />
+                                        #{tag}
+                                        <button
+                                            onClick={() => handleRemoveTag(tag)}
+                                            className="w-4 h-4 rounded-full bg-neutral-200 dark:bg-neutral-700 hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-500 flex items-center justify-center transition-colors"
+                                        >
+                                            <X className="w-2.5 h-2.5" />
+                                        </button>
                                     </span>
                                 ))}
-
-                                {isAddingTag ? (
-                                    <input
-                                        type="text"
-                                        value={newTag}
-                                        onChange={(e) => setNewTag(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') handleAddTag();
-                                            if (e.key === 'Escape') setIsAddingTag(false);
-                                        }}
-                                        onBlur={() => { if (!newTag) setIsAddingTag(false); }}
-                                        autoFocus
-                                        className="bg-transparent border border-primary text-primary rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none min-w-[80px]"
-                                        placeholder="New tag..."
-                                    />
-                                ) : (
-                                    <button
-                                        onClick={() => setIsAddingTag(true)}
-                                        className="px-3 py-1.5 rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs font-medium hover:border-primary hover:text-primary transition-colors flex items-center gap-1.5"
-                                    >
-                                        <Plus className="w-3 h-3" /> Add
-                                    </button>
+                                {(!item.tags || item.tags.length === 0) && (
+                                    <span className="text-xs text-neutral-400">No tags yet</span>
                                 )}
                             </div>
                         </div>
 
                         {/* Notes Input */}
-                        <div className="space-y-2">
+                        <div className="space-y-2 mb-12">
                             <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
                                 <MoreHorizontal className="w-3 h-3" />
                                 Personal Notes
@@ -346,13 +372,13 @@ export const ItemPreviewModal = ({
                                 onChange={(e) => setNotes(e.target.value)}
                                 onBlur={handleNotesBlur}
                                 placeholder="Add your thoughts, ideas, or key takeaways..."
-                                className="w-full min-h-[150px] bg-neutral-50 dark:bg-neutral-900/50 border-0 rounded-xl p-4 text-sm text-(--foreground) placeholder:text-neutral-400 focus:ring-2 focus:ring-primary/20 resize-none transition-all"
+                                className="w-full min-h-[150px] bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 text-sm text-neutral-700 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-600 focus:ring-2 focus:ring-primary/20 resize-none transition-all"
                             />
                         </div>
                     </div>
 
                     {/* Footer Actions */}
-                    <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 bg-(--background)/80 backdrop-blur-md absolute bottom-0 left-0 right-0">
+                    <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 bg-(--background)/80 dark:bg-neutral-900/80 backdrop-blur-md absolute bottom-0 left-0 right-0">
                         <div className="flex items-center justify-between gap-4">
                             <div className="flex gap-2">
                                 <button
@@ -367,16 +393,10 @@ export const ItemPreviewModal = ({
                                 >
                                     <LinkIcon className="w-4 h-4" />
                                 </button>
-                                <button
-                                    className="p-2.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors"
-                                    title="Share"
-                                >
-                                    <Share2 className="w-4 h-4" />
-                                </button>
                             </div>
 
                             <button
-                                onClick={handleDelete}
+                                onClick={() => setShowDeleteConfirm(true)}
                                 disabled={isDeleting}
                                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400 text-neutral-600 dark:text-neutral-400 text-xs font-bold transition-colors disabled:opacity-50"
                             >
@@ -388,6 +408,50 @@ export const ItemPreviewModal = ({
 
                 </div>
             </motion.div>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={handleDelete}
+                title="Delete Item?"
+                message="This action cannot be undone. The item will be permanently removed."
+                confirmText="Delete"
+                variant="danger"
+                isLoading={isDeleting}
+            />
+
+            {/* Add Tag Modal */}
+            <Modal
+                isOpen={showAddTagModal}
+                onClose={() => {
+                    setShowAddTagModal(false);
+                    setNewTag("");
+                }}
+                title="Add Tag"
+                size="sm"
+            >
+                <div className="space-y-4">
+                    <input
+                        type="text"
+                        value={newTag}
+                        onChange={(e) => setNewTag(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleAddTag();
+                        }}
+                        placeholder="Enter tag name..."
+                        autoFocus
+                        className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                    />
+                    <button
+                        onClick={handleAddTag}
+                        disabled={!newTag.trim()}
+                        className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Add Tag
+                    </button>
+                </div>
+            </Modal>
         </motion.div>
     );
 };
