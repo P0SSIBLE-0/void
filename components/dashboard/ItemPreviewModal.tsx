@@ -175,9 +175,8 @@ export const ItemPreviewModal = ({
             onClick={onClose}
         >
             <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                layoutId={`container-${item.id}`}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                 onClick={(e) => e.stopPropagation()}
                 className="bg-white dark:bg-neutral-950 w-full max-w-6xl h-[90vh] sm:h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row border border-neutral-200 dark:border-neutral-800"
             >

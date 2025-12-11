@@ -1,19 +1,11 @@
 import Link from "next/link";
-import * as motion from "motion/react-client";
 
 export const Navbar = () => {
   return (
     <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-neutral-950/50 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <motion.div
-            whileHover={{ rotate: 180 }}
-            transition={{ duration: 0.6 }}
-            className="w-8 h-8 bg-white rounded-full flex items-center justify-center relative overflow-hidden"
-          >
-            <div className="absolute inset-0 bg-linear-to-tr from-neutral-200 to-neutral-400" />
-            <div className="w-3 h-3 bg-neutral-950 rounded-full relative z-10" />
-          </motion.div>
+          <img src="/logo.svg" alt="logo" className="size-8 mr-2" />
           <span className="text-lg font-bold tracking-tighter text-white">Void</span>
         </div>
         <div className="flex items-center gap-6">

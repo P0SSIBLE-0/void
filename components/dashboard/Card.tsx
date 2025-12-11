@@ -32,17 +32,20 @@ export const Card = ({ item, category, onClick }: CardProps) => {
 
   return (
     <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
+      layoutId={`container-${item.id}`}
+      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       className="break-inside-avoid mb-4 group relative w-full cursor-pointer"
       onClick={onClick}
     >
-      <div className="bg-white dark:bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-xl dark:shadow-neutral-950/50 transition-all duration-300">
+      <div className="bg-white dark:bg-neutral-900 rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-xl dark:shadow-neutral-950/50 transition-all duration-300">
         {displayImage && (
-          <div className="relative w-full">
-            <img src={displayImage} alt={item.title} className="w-full h-auto object-cover transition-transform duration-700 group-hover:scale-105 block" />
+          <motion.div
+            layoutId={`image-${item.id}`}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="relative w-full overflow-hidden">
+            <img
+              src={displayImage} alt={item.title}
+              className="w-full h-auto object-cover transition-transform duration-700 group-hover:scale-105 block" />
             {item.type === 'link' && item.url && (
               <div className="absolute bottom-3 left-3 bg-black/50 backdrop-blur-md text-white text-[10px] font-medium px-2 py-1 rounded-full flex items-center gap-1">
                 <Globe className="w-3 h-3" /> {tryGetHostname(item.url)}
@@ -62,13 +65,13 @@ export const Card = ({ item, category, onClick }: CardProps) => {
                 {category.name}
               </div>
             )}
-          </div>
+          </motion.div>
         )}
 
-        <div className="p-5">
+        <div className="p-4">
           {!displayImage && (
-            <div className="flex items-center gap-2 mb-3">
-              <FileText className="w-6 h-6 text-neutral-300" />
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="size-6 text-neutral-300" />
               {category && (
                 <div
                   className="px-2 py-0.5 rounded-full text-[10px] font-medium flex items-center gap-1"
@@ -80,8 +83,8 @@ export const Card = ({ item, category, onClick }: CardProps) => {
               )}
             </div>
           )}
-          <h3 className="font-semibold text-neutral-900 dark:text-neutral-100 leading-tight mb-2 text-[15px]">
-            {item.title.split(' ').slice(0, 10).join(' ') || 'Untitled'}
+          <h3 className="font-semibold text-neutral-900 dark:text-neutral-100 leading-tight mb-2 text-sm">
+            {item.title.split(' ').slice(0, 8).join(' ') + '...' || 'Untitled'}
           </h3>
           {/* {(item.summary || item.content) && (
             <p className="text-neutral-500 text-sm line-clamp-3 leading-relaxed">

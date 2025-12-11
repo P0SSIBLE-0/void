@@ -36,10 +36,10 @@ export default function SignupPage() {
         throw error;
       }
 
-      toast.success("Check your email to verify your account!");
+      toast.success("user created successfully!");
+      router.push("/dashboard");
       // Optionally redirect to a "verify email" page
-      // router.push("/verify"); 
-      
+
     } catch (err: any) {
       toast.error(err.message || "An unexpected error occurred");
     } finally {

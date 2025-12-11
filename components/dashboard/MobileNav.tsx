@@ -13,6 +13,7 @@ import {
     Sun,
     Laptop,
     X,
+    LogOut,
 } from "lucide-react";
 import { Category, CATEGORY_COLORS, getRandomCategoryColor } from "@/types/item";
 import { Modal } from "@/components/ui/Modal";
@@ -80,9 +81,9 @@ export const MobileNav = ({
                             />
                             <motion.div
                                 initial={{ y: "120%" }}
-                                animate={{ y: '22%' }}
+                                animate={{ y: '20%' }}
                                 exit={{ y: "120%" }}
-                                transition={{ type: "spring", damping: 25, stiffness: 500, duration: 0.3 }}
+                                transition={{ type: "spring", damping: 25, stiffness: 300, duration: 0.3 }}
                                 className="fixed bottom-20 left-0 right-0 bg-white dark:bg-neutral-900 rounded-t-3xl z-50 max-h-[60vh] overflow-hidden shadow-2xl border-t border-neutral-200 dark:border-neutral-800"
                             >
                                 <div className="p-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
@@ -143,6 +144,18 @@ export const MobileNav = ({
                                         <Plus className="w-5 h-5" />
                                         <span>New Folder</span>
                                     </button>
+
+                                    <div className="h-px bg-neutral-100 dark:bg-neutral-800 my-2" />
+
+                                    <form action="/auth/signout" method="post">
+                                        <button
+                                            type="submit"
+                                            className="w-full flex items-center gap-3 p-4 rounded-2xl font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                                        >
+                                            <LogOut className="w-5 h-5" />
+                                            <span>Sign Out</span>
+                                        </button>
+                                    </form>
                                 </div>
                             </motion.div>
                         </>
@@ -176,7 +189,7 @@ export const MobileNav = ({
                         {/* Add (Center - Floating) */}
                         <button
                             onClick={onAddClick}
-                            className="relative -top-4 size-16 bg-linear-to-br from-zinc-900 to-gray-700 rounded-full shadow-lg shadow-gray-500/30 flex items-center justify-center text-white active:scale-95 transition-transform"
+                            className="relative -top-4 size-16 bg-neutral-800 dark:bg-white rounded-full shadow-lg shadow-gray-500/30 flex items-center justify-center text-white dark:text-black active:scale-95 transition-transform"
                         >
                             <Plus className="size-7" />
                         </button>

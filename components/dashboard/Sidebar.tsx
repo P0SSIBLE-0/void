@@ -90,8 +90,9 @@ export const Sidebar = ({
                 {/* Header */}
                 <div className="h-16 flex items-center justify-between px-4 border-b border-neutral-100 dark:border-neutral-800">
                     <Link href="/dashboard" className="flex items-center gap-3 group">
-                        <div className="w-10 h-10 bg-linear-to-br from-zinc-900 to-zinc-700 rounded-full flex items-center justify-center shadow-lg shadow-gray-500/20 group-hover:scale-105 transition-transform">
-                            <div className="w-3 h-3 bg-white rounded-full" />
+                        <div className="w-10 h-10  rounded-full flex items-center justify-center shadow-lg shadow-gray-500/20 group-hover:scale-105 transition-transform">
+                            {/* <div className="w-3 h-3 bg-white rounded-full" /> */}
+                            <img src="/logo.svg" alt="logo" className="invert dark:invert-0" />
                         </div>
                         {isExpanded && (
                             <motion.span
@@ -119,7 +120,7 @@ export const Sidebar = ({
                     <div className="mb-4">
                         <button
                             onClick={onAddClick}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium bg-linear-to-r from-zinc-900 to-gray-500 text-white shadow-lg shadow-gray-500/20 hover:shadow-gray-500/30 hover:to-zinc-800 transition-colors active:scale-100 ${!isExpanded && "justify-center"
+                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium dark:bg-white bg-neutral-800 dark:text-neutral-900 text-white shadow-lg shadow-gray-500/20 hover:shadow-gray-500/30 hover:to-zinc-800 transition-colors cursor-pointer hover:opacity-90 active:scale-100 ${!isExpanded && "justify-center"
                                 }`}
                         >
                             <Plus className="w-5 h-5" />
@@ -138,7 +139,7 @@ export const Sidebar = ({
                     <button
                         onClick={() => onSelectCategory(null)}
                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${activeCategory === null
-                            ? "bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white"
+                            ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-white"
                             : "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                             } ${!isExpanded && "justify-center"}`}
                     >

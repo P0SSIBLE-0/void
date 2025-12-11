@@ -19,7 +19,7 @@ export default async function LandingPage() {
     redirect('/dashboard');
   }
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-50 selection:bg-white/20 selection:text-white font-sans">
+    <div className="min-h-screen bg-neutral-950 text-neutral-50 selection:bg-white/20 selection:text-white">
       <BackgroundPattern />
       <Navbar />
       <HeroSection />

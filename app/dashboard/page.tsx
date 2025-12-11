@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useMemo, useRef } from "react";
-import { Loader2, Search } from "lucide-react";
-import * as motion from "motion/react-client";
-import { AnimatePresence } from "motion/react";
+import { Search } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { MobileNav } from "@/components/dashboard/MobileNav";
 import { Card } from "@/components/dashboard/Card";
 import { AddItemModal } from "@/components/dashboard/AddItemModal";
 import { ItemPreviewModal } from "@/components/dashboard/ItemPreviewModal";
 import { NoteModal } from "@/components/dashboard/NoteModal";
+import { CardSkeleton } from "@/components/dashboard/CardSkeleton";
 import { useItems } from "@/hooks/useItems";
 import { useCategories } from "@/hooks/useCategories";
 import { Item } from "@/types/item";
@@ -85,7 +85,7 @@ export default function DashboardPage() {
   const itemCount = items.filter((i) => !i.isPrompt && (activeCategory === null ? true : i.category_id === activeCategory)).length;
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
+    <div className="">
       {/* Desktop Sidebar */}
       <Sidebar
         categories={categories}
@@ -111,7 +111,7 @@ export default function DashboardPage() {
 
       {/* Main Content */}
       <main className={`transition-all duration-300 ${isSidebarExpanded ? "lg:pl-64" : "lg:pl-20"} pb-24 lg:pb-0 min-h-screen`}>
-        <div className="max-w-[1600px] mx-auto p-4 lg:p-8">
+        <div className="p-4 lg:p-8">
           {/* Header */}
           <header className="mb-8">
             {/* Category Title (Desktop) */}
@@ -142,7 +142,7 @@ export default function DashboardPage() {
             <motion.div
               className={`relative transition-all duration-300 lg:md:max-w-xl `}
             >
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-7 text-neutral-400" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-7 text-neutral-400 mr-2" />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -151,7 +151,7 @@ export default function DashboardPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => setIsSearchFocused(true)}
                 onBlur={() => setIsSearchFocused(false)}
-                className={`w-full bg-neutral-100 focus:bg-white dark:bg-neutral-900 dark:focus:bg-neutral-800 rounded-full py-4 pl-12 pr-4 placeholder:text-neutral-500 focus:outline-none transition-all font-bold lg:md:text-2xl tracking-wide`}
+                className={`w-full bg-neutral-200 focus:bg-white dark:bg-neutral-900 dark:focus:bg-neutral-800 rounded-full py-4 pl-14 pr-4 placeholder:text-neutral-500 focus:outline-none focus:shadow transition-all font-semibold lg:md:text-2xl tracking-wide`}
               />
               {searchQuery && (
                 <motion.button
@@ -169,14 +169,11 @@ export default function DashboardPage() {
           {/* Items Grid */}
           <div className="min-h-[400px]">
             {loading ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex flex-col items-center justify-center h-64 gap-4"
-              >
-                <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
-                <p className="text-neutral-500">Loading your items...</p>
-              </motion.div>
+              <div className="columns-2 sm:columns-2 lg:columns-3 xl:columns-4 gap-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <CardSkeleton key={i} />
+                ))}
+              </div>
             ) : filteredItems.length === 0 ? (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
