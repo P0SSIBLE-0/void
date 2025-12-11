@@ -83,24 +83,24 @@ export async function POST(req: NextRequest) {
 
         title = scraped.title || title;
         description = scraped.description;
-        content = scraped.content;
-        textContent = scraped.textContent;
-        image = scraped.image;
+        content = scraped.content || "";
+        textContent = scraped.textContent || "";
+        image = scraped.image || null;
         meta = {
-          contentType: scraped.meta.contentType,
-          siteName: scraped.meta.siteName,
-          favicon: scraped.meta.favicon,
-          canonicalUrl: scraped.meta.canonicalUrl,
-          price: scraped.meta.price,
-          currency: scraped.meta.currency,
-          author: scraped.meta.author,
-          publishedTime: scraped.meta.publishedTime,
-          readingTime: scraped.meta.readingTime,
-          videoUrl: scraped.meta.videoUrl,
-          hasCode: scraped.meta.hasCode,
+          contentType: scraped.type,
+          siteName: scraped.siteName,
+          favicon: scraped.favicon,
+          canonicalUrl: scraped.canonicalUrl,
+          price: scraped.price,
+          currency: scraped.currency,
+          author: scraped.author,
+          publishedTime: scraped.publishedTime,
+          readingTime: scraped.readingTime,
+          videoUrl: scraped.videoUrl,
+          // hasCode: scraped.hasCode, // Not yet implemented
         };
 
-        console.log(`[Save API] Scrape completed for ${scraped.meta.contentType}`);
+        console.log(`[Save API] Scrape completed for ${scraped.type}`);
       } catch (e) {
         console.error("[Save API] Scraping failed:", e);
         // Continue with basic info

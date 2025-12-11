@@ -176,7 +176,7 @@ export const ItemPreviewModal = ({
         >
             <motion.div
                 layoutId={`container-${item.id}`}
-                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
                 onClick={(e) => e.stopPropagation()}
                 className="bg-white dark:bg-neutral-950 w-full max-w-6xl h-[90vh] sm:h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row border border-neutral-200 dark:border-neutral-800"
             >

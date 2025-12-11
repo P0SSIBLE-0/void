@@ -1,360 +1,266 @@
+import { ScrapedData, ScraperError, ContentType } from './types';
+import { parseHtml, isJsShell } from './parser';
+
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// Known JS-heavy domains that require browser rendering
+const JS_HEAVY_DOMAINS = [
+  'twitter.com',
+  'x.com',
+  'instagram.com',
+  'facebook.com',
+  'linkedin.com',
+  'pinterest.com',
+  'tiktok.com',
+];
+
+function isJsHeavyDomain(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.replace('www.', '');
+    return JS_HEAVY_DOMAINS.some(domain => hostname.includes(domain));
+  } catch {
+    return false;
+  }
+}
+
+function isValidResult(result: ScrapedData): boolean {
+  // Must have a valid title (not just 'Untitled' or empty)
+  if (!result.title || result.title === 'Untitled' || result.title.trim().length < 2) {
+    console.log(`[Scraper] Validation failed: empty/untitled`);
+    return false;
+  }
+
+  // Check for common block/error page indicators (more specific patterns)
+  const badTitlePatterns = [
+    'just a moment', 'attention required', 'security check', 'access denied', 'please wait',
+    '404 -', '404 |', '404:', 'page not found', '403 forbidden', '500 -', '500 |',
+    'something went wrong', 'we couldn\'t find', 'an error occurred', 'error page'
+  ];
+  const titleLower = result.title.toLowerCase();
+
+  // Check if title STARTS with or IS primarily an error message
+  if (badTitlePatterns.some(bad => titleLower.includes(bad))) {
+    console.log(`[Scraper] Validation failed: bad title pattern in "${result.title}"`);
+    return false;
+  }
+
+  // Check description for 404 indicators too
+  if (result.description) {
+    const descLower = result.description.toLowerCase();
+    const badDescs = ['page not found', '404 error', 'doesn\'t exist', 'no longer available'];
+    if (badDescs.some(bad => descLower.includes(bad))) {
+      console.log(`[Scraper] Validation failed: bad description pattern`);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 /**
- * Smart URL Scraper
- * 
- * Modular scraper that:
- * 1. Detects blocked/anti-bot responses and falls back to ScrapingAnt
- * 2. Prioritizes OG/meta data
- * 3. Uses Microlink for screenshots when needed
+ * Step 1: Native Fetch
+ * Fast, cheap, but fails on JS-heavy sites or bot protection.
  */
+async function fetchNative(url: string): Promise<ScrapedData | null> {
+  // Skip native fetch for known JS-heavy sites
+  if (isJsHeavyDomain(url)) {
+    console.log(`[Scraper] Skipping native fetch for JS-heavy domain: ${url}`);
+    return null;
+  }
 
-import * as cheerio from 'cheerio';
-import { Readability } from '@mozilla/readability';
-import { parseHTML } from 'linkedom';
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Cache-Control': 'no-cache',
+      },
+    }, 3000); // 3s timeout
 
-import type { ScrapedData, ContentType, MicrolinkData } from './types';
-import { ScraperError } from './types';
-import { smartFetch, fetchWithMicrolink } from './fetchers';
-
-// ============================================================================
-// Main Scraper Function
-// ============================================================================
-
-export async function scrapeUrl(url: string): Promise<ScrapedData> {
-    console.log(`[Scraper] Starting: ${url}`);
-
-    try {
-        // 1. Check if it's a direct media URL
-        if (isDirectMedia(url)) {
-            return handleDirectMedia(url);
-        }
-
-        // 2. Detect expected content type
-        const contentType = detectContentType(url);
-
-        // 3. Fetch HTML with smart fallback (direct → ScrapingAnt)
-        const fetchResult = await smartFetch(url);
-
-        // 4. If fetch failed completely, use Microlink as LAST RESORT
-        if (!fetchResult.html) {
-            console.warn(`[Scraper] All fetch methods failed: ${fetchResult.error}`);
-            return await handleMicrolinkFallback(url, contentType, fetchResult.error);
-        }
-
-        // 5. Parse and extract data (OG data is prioritized in extractAllData)
-        const $ = cheerio.load(fetchResult.html);
-        const data = extractAllData($, url, contentType);
-
-        console.log(`[Scraper] Done via ${fetchResult.method}`);
-        return data;
-
-    } catch (error) {
-        console.error('[Scraper] Unexpected error:', error);
-
-        if (error instanceof ScraperError) {
-            throw error;
-        }
-
-        // Return fallback data instead of throwing
-        return createFallbackData(url, error instanceof Error ? error.message : 'Unknown error');
-    }
-}
-
-// ============================================================================
-// URL Analysis
-// ============================================================================
-
-function isDirectMedia(url: string): boolean {
-    return /\.(jpg|jpeg|png|gif|webp|svg|pdf)(\?|$)/i.test(url);
-}
-
-function detectContentType(url: string): ContentType {
-    const lower = url.toLowerCase();
-
-    if (/youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|imdb\.com\/title/.test(lower)) return 'video';
-    if (/twitter\.com|x\.com|instagram\.com|facebook\.com|linkedin\.com|reddit\.com/.test(lower)) return 'social';
-    if (/github\.com|gitlab\.com|codepen\.io|codesandbox\.io/.test(lower)) return 'code';
-    if (/\/product\/|\/p\/|\/dp\/|\/item\/|amazon\.|flipkart\.|ebay\./.test(lower)) return 'product';
-    if (/\/blog\/|\/article\/|\/post\/|medium\.com|substack\.com/.test(lower)) return 'article';
-    if (/\.pdf(\?|$)/i.test(lower)) return 'pdf';
-
-    return 'website';
-}
-
-// ============================================================================
-// Data Extraction
-// ============================================================================
-
-function extractAllData($: cheerio.CheerioAPI, url: string, contentType: ContentType): ScrapedData {
-    // OG/Meta tags first (highest priority)
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    const ogDesc = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content') || $('meta[name="twitter:image"]').attr('content');
-    const ogType = $('meta[property="og:type"]').attr('content');
-    const ogSite = $('meta[property="og:site_name"]').attr('content');
-    const ogVideo = $('meta[property="og:video"]').attr('content');
-
-    // Fallback extraction
-    const title = ogTitle || $('title').text().trim() || extractTitleFromUrl(url);
-    const description = ogDesc || extractDescriptionFallback($);
-    const image = normalizeUrl(ogImage, url) || extractBestImage($, url);
-
-    // Content extraction for articles
-    let textContent = '';
-    let content = '';
-    let readingTime = 0;
-
-    if (contentType === 'article' || (contentType === 'website' && !ogDesc)) {
-        const article = extractReadableContent($);
-        textContent = article.textContent;
-        content = article.content;
-        readingTime = Math.ceil(textContent.split(/\s+/).length / 200);
+    if (!res.ok) {
+      console.log(`[Scraper] Native fetch failed (${res.status}) for ${url}`);
+      return null;
     }
 
-    // Fallback text content
-    if (!textContent) {
-        $('script, style, nav, footer, header, aside').remove();
-        textContent = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 5000);
+    const html = await res.text();
+
+    // Debug: Log HTML length and snippet
+    console.log(`[Scraper] Native HTML length: ${html.length}, snippet: ${html.substring(0, 200).replace(/\n/g, ' ')}`);
+
+    // Check if it's a JS shell
+    if (isJsShell(html)) {
+      console.log(`[Scraper] Detected JS shell for ${url}`);
+      return null;
     }
 
-    // Price extraction
-    const { price, currency } = extractPrice($);
+    const result = parseHtml(html, url);
 
-    // Detect actual content type from OG
-    let finalType = contentType;
-    if (ogType?.includes('video')) finalType = 'video';
-    else if (ogType === 'product' || price) finalType = 'product';
-    else if (ogType === 'article') finalType = 'article';
+    // Debug: Log parsed title
+    console.log(`[Scraper] Parsed title: "${result.title}", image: ${result.image ? 'found' : 'missing'}`);
 
-    return {
-        url,
-        type: finalType === 'pdf' ? 'pdf' : finalType === 'image' ? 'image' : 'link',
-        title,
-        description,
-        image: isValidImage(image) ? image : null,
-        content,
-        textContent,
-        meta: {
-            contentType: finalType,
-            siteName: ogSite,
-            favicon: extractFavicon($, url),
-            canonicalUrl: $('link[rel="canonical"]').attr('href') || url,
-            price,
-            currency,
-            author: $('meta[name="author"]').attr('content'),
-            publishedTime: $('meta[property="article:published_time"]').attr('content'),
-            readingTime: readingTime || undefined,
-            videoUrl: ogVideo || (finalType === 'video' ? url : undefined),
-            hasCode: $('pre code').length > 0,
-        },
-    };
-}
-
-function extractDescriptionFallback($: cheerio.CheerioAPI): string {
-    // Try JSON-LD
-    let desc = '';
-    $('script[type="application/ld+json"]').each((_, el) => {
-        try {
-            const json = JSON.parse($(el).html() || '{}');
-            if (json.description) desc = json.description;
-        } catch { /* ignore */ }
-    });
-    return desc ? desc.substring(0, 500) : '';
-}
-
-function extractBestImage($: cheerio.CheerioAPI, baseUrl: string): string | null {
-    // JSON-LD first
-    let jsonImage: string | null = null;
-    $('script[type="application/ld+json"]').each((_, el) => {
-        try {
-            const json = JSON.parse($(el).html() || '{}');
-            const img = json.image || json.thumbnailUrl;
-            if (img) jsonImage = typeof img === 'string' ? img : (Array.isArray(img) ? img[0] : img.url);
-        } catch { /* ignore */ }
-    });
-    if (jsonImage && isValidImage(jsonImage)) return normalizeUrl(jsonImage, baseUrl);
-
-    // Score DOM images
-    let best: string | null = null;
-    let maxScore = 0;
-
-    $('img').each((_, el) => {
-        const $img = $(el);
-        const src = $img.attr('src') || $img.attr('data-src');
-        if (!src) return;
-
-        const normalized = normalizeUrl(src, baseUrl);
-        if (!normalized || !isValidImage(normalized)) return;
-
-        let score = 0;
-        const width = parseInt($img.attr('width') || '0');
-        const height = parseInt($img.attr('height') || '0');
-
-        if (width * height > 5000) score += 100;
-        if ($img.closest('article, main, [role="main"]').length) score += 50;
-        if ($img.closest('header, nav, footer, aside').length) score -= 100;
-
-        const cls = ($img.attr('class') || '').toLowerCase();
-        if (cls.includes('hero') || cls.includes('feature') || cls.includes('cover')) score += 75;
-
-        if (score > maxScore) {
-            maxScore = score;
-            best = normalized;
-        }
-    });
-
-    return best;
-}
-
-function extractPrice($: cheerio.CheerioAPI): { price?: string; currency?: string } {
-    let price = $('meta[property="product:price:amount"]').attr('content') ||
-        $('meta[property="og:price:amount"]').attr('content');
-    let currency = $('meta[property="product:price:currency"]').attr('content') || 'USD';
-
-    if (!price) {
-        $('script[type="application/ld+json"]').each((_, el) => {
-            try {
-                const json = JSON.parse($(el).html() || '{}');
-                if (json['@type'] === 'Product' && json.offers) {
-                    const offer = Array.isArray(json.offers) ? json.offers[0] : json.offers;
-                    price = offer.price;
-                    currency = offer.priceCurrency || currency;
-                }
-            } catch { /* ignore */ }
-        });
+    // Validate the result has meaningful data
+    if (!isValidResult(result)) {
+      console.log(`[Scraper] Native fetch returned invalid/empty result for ${url}`);
+      return null;
     }
 
-    return { price: price ? String(price) : undefined, currency };
+    return result;
+  } catch (error) {
+    console.log(`[Scraper] Native fetch error for ${url}:`, error instanceof Error ? error.message : 'Unknown');
+    return null;
+  }
 }
 
-function extractFavicon($: cheerio.CheerioAPI, baseUrl: string): string | undefined {
-    const href = $('link[rel="icon"]').attr('href') ||
-        $('link[rel="shortcut icon"]').attr('href') ||
-        $('link[rel="apple-touch-icon"]').attr('href');
+/**
+ * Step 2: ScrapingAnt
+ * Renders JS, handles anti-bot. Costs money/credits.
+ */
+async function fetchScrapingAnt(targetUrl: string): Promise<ScrapedData | null> {
+  const apiKey = process.env.SCRAPINGANT_API_KEY;
+  if (!apiKey) {
+    console.warn('[Scraper] No SCRAPING_ANT_API_KEY configured, skipping.');
+    return null;
+  }
 
-    if (href) return normalizeUrl(href, baseUrl) || undefined;
+  try {
+    // Construct ScrapingAnt URL
+    // We use browser=true to render JS
+    const saUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(targetUrl)}&x-api-key=${apiKey}&browser=true&return_page_source=true`;
 
-    try {
-        return new URL('/favicon.ico', baseUrl).href;
-    } catch {
-        return undefined;
-    }
-}
+    const res = await fetchWithTimeout(saUrl, {
+      method: 'GET',
+    }, 8000); // 8s timeout
 
-function extractReadableContent($: cheerio.CheerioAPI): { content: string; textContent: string } {
-    try {
-        const html = $.html();
-        const { document } = parseHTML(html);
-        const reader = new Readability(document as unknown as Document);
-        const article = reader.parse();
-        return {
-            content: article?.content || '',
-            textContent: article?.textContent || '',
-        };
-    } catch {
-        return { content: '', textContent: '' };
-    }
-}
-
-// ============================================================================
-// Utilities
-// ============================================================================
-
-function normalizeUrl(url: string | undefined, base: string): string | null {
-    if (!url) return null;
-    try {
-        if (url.startsWith('data:')) return url;
-        if (url.startsWith('//')) return `https:${url}`;
-        return new URL(url, base).href;
-    } catch {
-        return null;
-    }
-}
-
-function isValidImage(url: string | null): boolean {
-    if (!url) return false;
-    const lower = url.toLowerCase();
-
-    if (lower.endsWith('.svg') || lower.includes('placeholder') ||
-        lower.includes('1x1.') || lower.includes('spacer')) {
-        return false;
+    if (!res.ok) {
+      console.log(`[Scraper] ScrapingAnt failed (${res.status}) for ${targetUrl}`);
+      return null;
     }
 
-    return /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(url) ||
-        /ytimg\.com|twimg\.com|cdninstagram|imgur\.com|media-amazon|flixcart|unsplash/.test(lower);
-}
+    const text = await res.text();
 
-function extractTitleFromUrl(url: string): string {
-    try {
-        const u = new URL(url);
-        const path = u.pathname.split('/').filter(Boolean).pop();
-        if (path) return path.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        return u.hostname;
-    } catch {
-        return 'Untitled';
-    }
-}
-
-// ============================================================================
-// Fallback Handlers
-// ============================================================================
-
-function handleDirectMedia(url: string): ScrapedData {
-    const isPdf = url.toLowerCase().endsWith('.pdf');
-    return {
-        url,
-        type: isPdf ? 'pdf' : 'image',
-        title: extractTitleFromUrl(url),
-        description: '',
-        image: isPdf ? null : url,
-        content: '',
-        textContent: '',
-        meta: { contentType: isPdf ? 'pdf' : 'image' },
-    };
-}
-
-async function handleMicrolinkFallback(
-    url: string,
-    contentType: ContentType,
-    error?: string
-): Promise<ScrapedData> {
-    console.log('[Scraper] Using Microlink fallback');
-
-    const microlink = await fetchWithMicrolink(url, true);
-
-    if (microlink) {
-        return {
-            url,
-            type: 'link',
-            title: microlink.title || extractTitleFromUrl(url),
-            description: microlink.description || '',
-            image: microlink.screenshot || microlink.image || null,
-            content: '',
-            textContent: '',
-            meta: {
-                contentType,
-                siteName: microlink.publisher,
-                author: microlink.author,
-                favicon: microlink.logo,
-            },
-        };
+    // If it's a JSON error response
+    if (text.trim().startsWith('{') && text.includes('"error"')) {
+      console.log(`[Scraper] ScrapingAnt returned error JSON: ${text.substring(0, 100)}`);
+      return null;
     }
 
-    return createFallbackData(url, error);
+    return parseHtml(text, targetUrl);
+
+  } catch (error) {
+    console.log(`[Scraper] ScrapingAnt timed out or error for ${targetUrl}:`, error instanceof Error ? error.message : 'Unknown error');
+    return null;
+  }
 }
 
-function createFallbackData(url: string, error?: string): ScrapedData {
-    return {
-        url,
+/**
+ * Step 3: Microlink
+ * Reliable metadata extraction as last resort.
+ */
+async function fetchMicrolink(targetUrl: string): Promise<ScrapedData | null> {
+  try {
+    const microlinkUrl = `https://api.microlink.io?url=${encodeURIComponent(targetUrl)}`;
+    const res = await fetchWithTimeout(microlinkUrl, {}, 10000); // 10s timeout
+
+    if (!res.ok) {
+      console.log(`[Scraper] Microlink API returned ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    if (data.status === 'success' && data.data) {
+      const m = data.data;
+      const result: ScrapedData = {
+        url: targetUrl,
+        title: m.title || new URL(targetUrl).hostname,
+        description: m.description || '',
+        image: m.image?.url || undefined,
+        favicon: m.logo?.url || undefined,
         type: 'link',
-        title: extractTitleFromUrl(url),
-        description: error ? `Could not fetch: ${error}` : 'Failed to scrape content',
-        image: null,
-        content: '',
-        textContent: '',
-        meta: { contentType: 'website' },
-    };
+        siteName: m.publisher || undefined,
+        author: m.author || undefined,
+      };
+
+      // Validate Microlink result too
+      if (!isValidResult(result)) {
+        console.log(`[Scraper] Microlink returned invalid result for ${targetUrl}`);
+        return null;
+      }
+
+      return result;
+    }
+    return null;
+  } catch (error) {
+    console.log(`[Scraper] Microlink error for ${targetUrl}:`, error instanceof Error ? error.message : 'Unknown');
+    return null;
+  }
 }
 
-// Re-export types
-export type { ScrapedData, ContentType } from './types';
-export { ScraperError } from './types';
+/**
+ * Main Scraper Function
+ * Implements the waterfall strategy.
+ */
+export async function scrapeUrl(url: string): Promise<ScrapedData> {
+  // Validate URL
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    throw new ScraperError('Invalid URL provided', 'INVALID_URL', url);
+  }
+
+  console.log(`[Scraper] Starting strategy for: ${url}`);
+
+  // 1. Native Fetch (skip for JS-heavy domains)
+  const nativeResult = await fetchNative(url);
+  if (nativeResult) {
+    console.log('[Scraper] ✓ Native fetch successful');
+    return nativeResult;
+  }
+
+  // 2. ScrapingAnt (Browser/JS) - handles JS-heavy sites
+  console.log('[Scraper] → Trying ScrapingAnt...');
+  const antResult = await fetchScrapingAnt(url);
+  if (antResult && isValidResult(antResult)) {
+    console.log('[Scraper] ✓ ScrapingAnt successful');
+    return antResult;
+  }
+
+  // 3. Microlink (Metadata Fallback) - good for social media
+  console.log('[Scraper] → Trying Microlink...');
+  const microResult = await fetchMicrolink(url);
+  if (microResult) {
+    console.log('[Scraper] ✓ Microlink successful');
+    return microResult;
+  }
+
+  // 4. Fallback - return basic info from URL
+  console.log('[Scraper] ⚠ All strategies failed, returning basic info');
+  return {
+    url,
+    title: parsedUrl.hostname.replace('www.', ''),
+    description: `Content from ${parsedUrl.hostname}`,
+    type: 'link',
+    favicon: `${parsedUrl.origin}/favicon.ico`,
+  };
+}
+
+export type { ScrapedData, ContentType };
+export { ScraperError };

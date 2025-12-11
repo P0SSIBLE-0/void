@@ -33,7 +33,7 @@ export const Card = ({ item, category, onClick }: CardProps) => {
   return (
     <motion.div
       layoutId={`container-${item.id}`}
-      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
       className="break-inside-avoid mb-4 group relative w-full cursor-pointer"
       onClick={onClick}
     >
@@ -41,7 +41,7 @@ export const Card = ({ item, category, onClick }: CardProps) => {
         {displayImage && (
           <motion.div
             layoutId={`image-${item.id}`}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
             className="relative w-full overflow-hidden">
             <img
               src={displayImage} alt={item.title}
